@@ -15,6 +15,8 @@ function circuitBreakerPlugin (fastify, opts, next) {
   const threshold = opts.threshold || 5
   const timeoutErrorMessage = opts.timeoutErrorMessage || 'Timeout'
   const circuitOpenErrorMessage = opts.circuitOpenErrorMessage || 'Circuit open'
+  const onTimeout = opts.onTimeout;
+  const onCircuitOpen = opts.onCircuitOpen;
   const cache = lru(opts.cache || 500)
 
   var routeId = 0
@@ -58,6 +60,17 @@ function circuitBreakerPlugin (fastify, opts, next) {
     }
   }
 
+  function processCallback(callback, req, reply, next) {
+    const res = callback(req, reply);
+    if (res instanceof Error) {
+      return next(res);
+    }
+    if (res instanceof String) {
+      return next(null, res);
+    }
+    return next(null, JSON.stringify(res));
+  }
+
   function onSend (req, reply, payload, next) {
     if (req._cbRouteId === 0 || req._cbIsOpen === true) {
       return next()
@@ -70,6 +83,9 @@ function circuitBreakerPlugin (fastify, opts, next) {
       if (route.failures >= route.threshold) {
         route.status = OPEN
         runTimer(req._cbRouteId)
+      }
+      if (onTimeout) {
+        return processCallback(onTimeout, req, reply, next);
       }
       return next(new TimeoutError())
     }
@@ -90,6 +106,9 @@ function circuitBreakerPlugin (fastify, opts, next) {
     if (route.failures >= route.threshold) {
       route.status = OPEN
       runTimer(req._cbRouteId)
+      if (onCircuitOpen) {
+        return processCallback(onCircuitOpen, req, reply, next);
+      }
       return next(new CircuitOpenError())
     }
 
